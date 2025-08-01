@@ -337,11 +337,11 @@
             <footer className="mt-12 text-center text-xs text-gray-500"><p>&copy; {new Date().getFullYear()} Soccer Sub Tracker. Plan, Play, and Pep Talk!</p></footer>
           </div>
         );
-      }
+      } // <-- This is the missing closing brace for function App
 
-      const container = document.getElementById('root');
-      const root = ReactDOM.createRoot(container);
-      root.render(<App />);
-    </script>
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(<App />);
+</script>
 </body>
 </html>
