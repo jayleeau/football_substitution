@@ -83,6 +83,23 @@
             const playerSlotCountsThisHalf = {};
             playersList.forEach(p => { playerSlotCountsThisHalf[p.id] = { GK: 0, ON: 0, OFF: 0 }; });
             let currentSlotAssignments = previousSlotAssignments || {};
+            const specialOutfieldPlayers = playersList.filter(p => p.id !== goalieForThisHalfPlayer?.id);
+            if (!designatedPlayerOutfieldThisHalf && specialOutfieldPlayers.length === OUTFIELD_PLAYERS_ON_FIELD * 2) {
+                const group1 = specialOutfieldPlayers.slice(0, OUTFIELD_PLAYERS_ON_FIELD);
+                const group2 = specialOutfieldPlayers.slice(OUTFIELD_PLAYERS_ON_FIELD);
+                for (let i = 0; i < numSlotsInHalf; i++) {
+                    const newSlotAssignments = {};
+                    playersList.forEach(player => { if (cumulativePlanStats[player.id] && currentSlotAssignments[player.id] !== 'ON') { cumulativePlanStats[player.id].consecutiveON = 0; } });
+                    if (goalieForThisHalfPlayer) { newSlotAssignments[goalieForThisHalfPlayer.id] = 'GK'; cumulativePlanStats[goalieForThisHalfPlayer.id].GK++; cumulativePlanStats[goalieForThisHalfPlayer.id].consecutiveON = 0; }
+                    const activeGroup = i < numSlotsInHalf / 2 ? group1 : group2;
+                    const benchGroup = i < numSlotsInHalf / 2 ? group2 : group1;
+                    activeGroup.forEach(p => { newSlotAssignments[p.id] = 'ON'; cumulativePlanStats[p.id].ON++; cumulativePlanStats[p.id].consecutiveON = currentSlotAssignments[p.id] === 'ON' ? (cumulativePlanStats[p.id].consecutiveON || 0) + 1 : 1; if (halfNumber === 1) cumulativePlanStats[p.id].playedInH1 = true; });
+                    benchGroup.forEach(p => { newSlotAssignments[p.id] = 'OFF'; cumulativePlanStats[p.id].OFF++; cumulativePlanStats[p.id].consecutiveON = 0; });
+                    halfSlotsData.push({ assignments: newSlotAssignments });
+                    currentSlotAssignments = newSlotAssignments;
+                }
+                return halfSlotsData;
+            }
             for (let i = 0; i < numSlotsInHalf; i++) {
                 const newSlotAssignments = {};
                 playersList.forEach(player => { if (cumulativePlanStats[player.id] && currentSlotAssignments[player.id] !== 'ON') { cumulativePlanStats[player.id].consecutiveON = 0; } });
