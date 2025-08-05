@@ -89,6 +89,23 @@
             const playerSlotCountsThisHalf = {};
             playersList.forEach(p => { playerSlotCountsThisHalf[p.id] = { GK: 0, ON: 0, OFF: 0 }; });
             let currentSlotAssignments = previousSlotAssignments || {};
+            const specialOutfieldPlayers = playersList.filter(p => p.id !== goalieForThisHalfPlayer?.id);
+            if (!designatedPlayerOutfieldThisHalf && specialOutfieldPlayers.length === OUTFIELD_PLAYERS_ON_FIELD * 2) {
+                const group1 = specialOutfieldPlayers.slice(0, OUTFIELD_PLAYERS_ON_FIELD);
+                const group2 = specialOutfieldPlayers.slice(OUTFIELD_PLAYERS_ON_FIELD);
+                for (let i = 0; i < numSlotsInHalf; i++) {
+                    const newSlotAssignments = {};
+                    playersList.forEach(player => { if (cumulativePlanStats[player.id] && currentSlotAssignments[player.id] !== 'ON') { cumulativePlanStats[player.id].consecutiveON = 0; } });
+                    if (goalieForThisHalfPlayer) { newSlotAssignments[goalieForThisHalfPlayer.id] = 'GK'; cumulativePlanStats[goalieForThisHalfPlayer.id].GK++; cumulativePlanStats[goalieForThisHalfPlayer.id].consecutiveON = 0; }
+                    const activeGroup = i < numSlotsInHalf / 2 ? group1 : group2;
+                    const benchGroup = i < numSlotsInHalf / 2 ? group2 : group1;
+                    activeGroup.forEach(p => { newSlotAssignments[p.id] = 'ON'; cumulativePlanStats[p.id].ON++; cumulativePlanStats[p.id].consecutiveON = currentSlotAssignments[p.id] === 'ON' ? (cumulativePlanStats[p.id].consecutiveON || 0) + 1 : 1; if (halfNumber === 1) cumulativePlanStats[p.id].playedInH1 = true; });
+                    benchGroup.forEach(p => { newSlotAssignments[p.id] = 'OFF'; cumulativePlanStats[p.id].OFF++; cumulativePlanStats[p.id].consecutiveON = 0; });
+                    halfSlotsData.push({ assignments: newSlotAssignments });
+                    currentSlotAssignments = newSlotAssignments;
+                }
+                return halfSlotsData;
+            }
             for (let i = 0; i < numSlotsInHalf; i++) {
                 const newSlotAssignments = {};
                 playersList.forEach(player => { if (cumulativePlanStats[player.id] && currentSlotAssignments[player.id] !== 'ON') { cumulativePlanStats[player.id].consecutiveON = 0; } });
@@ -115,8 +132,82 @@
             }
             return halfSlotsData;
         }, []);
-        const generateFullGamePlan = React.useCallback((gamePlayers) => { if (gamePlayers.length === 0) return null; const numSlotsPerHalf = Math.floor(HALF_DURATION_SECONDS / SLOT_DURATION_SECONDS); const cumulativePlanStats = {}; gamePlayers.forEach(p => { cumulativePlanStats[p.id] = { GK: 0, ON: 0, OFF: 0, name: p.name, number: p.number, playedInH1: false, consecutiveON: 0 }; }); let planGoalieH1Player = null, planGoalieH2Player = null; let dgOutfieldH1Player = null, dgOutfieldH2Player = null; const dg1 = designatedGoalie1Id ? gamePlayers.find(p => p.id === designatedGoalie1Id) : null; const dg2 = designatedGoalie2Id ? gamePlayers.find(p => p.id === designatedGoalie2Id) : null; if (dg1 && dg2) { planGoalieH1Player = dg1; dgOutfieldH1Player = dg2; planGoalieH2Player = dg2; dgOutfieldH2Player = dg1; } else if (dg1) { planGoalieH1Player = dg1; dgOutfieldH2Player = dg1; const potentialH2Goalies = gamePlayers.filter(p => p.id !== dg1.id); if (potentialH2Goalies.length > 0) planGoalieH2Player = potentialH2Goalies[0]; else planGoalieH2Player = dg1; } else { planGoalieH1Player = goalieForHalf1; planGoalieH2Player = goalieForHalf2; } if (goalieForHalf1 && gamePlayers.find(p=>p.id === goalieForHalf1.id)) planGoalieH1Player = goalieForHalf1; const h1Slots = planGoalieH1Player ? generateHalfPlan(gamePlayers, planGoalieH1Player, dgOutfieldH1Player, numSlotsPerHalf, 1, cumulativePlanStats, null) : []; const lastSlotH1Assignments = h1Slots.length > 0 ? h1Slots[h1Slots.length - 1].assignments : null; const actualPlanGoalieH2 = (goalieForHalf2 && gamePlayers.find(p=>p.id === goalieForHalf2.id)) ? goalieForHalf2 : planGoalieH2Player; const h2Slots = actualPlanGoalieH2 ? generateHalfPlan(gamePlayers, actualPlanGoalieH2, dgOutfieldH2Player, numSlotsPerHalf, 2, cumulativePlanStats, lastSlotH1Assignments) : []; setSubstitutionPlan({ half1: h1Slots, half2: h2Slots, totalPlayerSlotCounts: cumulativePlanStats }); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); }, [designatedGoalie1Id, designatedGoalie2Id, goalieForHalf1, goalieForHalf2, generateHalfPlan]);
-        React.useEffect(() => { if (!substitutionPlan || !(gamePhase.includes('Playing') || gamePhase.includes('PreHalf'))) { setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); return; } const currentPlanHalfData = currentHalf === 1 ? substitutionPlan.half1 : substitutionPlan.half2; if (!currentPlanHalfData || currentPlanHalfData.length === 0) { setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); return; } let firstRelevantSlotIndex = acknowledgedPlannedSubSlotIndex + 1; if ((gamePhase.includes('PreHalf1') || gamePhase.includes('PreHalf2')) && acknowledgedPlannedSubSlotIndex === -1) { firstRelevantSlotIndex = 0; } let foundNextSub = false; for (let slotIdx = firstRelevantSlotIndex; slotIdx < currentPlanHalfData.length; slotIdx++) { const prevSlotAssignments = (slotIdx === 0) ? (currentHalf === 2 && substitutionPlan.half1.length > 0 ? substitutionPlan.half1[substitutionPlan.half1.length -1].assignments : {}) : currentPlanHalfData[slotIdx - 1].assignments; const targetSlotAssignments = currentPlanHalfData[slotIdx].assignments; const playersPlannedOff = []; const playersPlannedOn = []; players.forEach(player => { const prevStatus = prevSlotAssignments[player.id]; const targetStatus = targetSlotAssignments[player.id]; if (slotIdx === 0 && targetStatus === 'ON' && player.id !== (currentHalf === 1 ? goalieForHalf1?.id : goalieForHalf2?.id) ) { playersPlannedOn.push(player); } else if (slotIdx > 0) { if (prevStatus === 'ON' && targetStatus !== 'ON') playersPlannedOff.push(player); else if (prevStatus !== 'ON' && targetStatus === 'ON') playersPlannedOn.push(player); } }); const isInitial = (slotIdx === 0 && acknowledgedPlannedSubSlotIndex === -1); if (playersPlannedOff.length > 0 || playersPlannedOn.length > 0 || isInitial) { setNextPlannedSubInfo({ timeString: formatTime(slotIdx * SLOT_DURATION_SECONDS), playersComingOff: playersPlannedOff, playersGoingOn: playersPlannedOn, isApplicable: true, slotIndex: slotIdx, isInitialLineup: isInitial }); foundNextSub = true; break; } } if (!foundNextSub) setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: currentPlanHalfData.length > 0 ? 'End of Half' : '', slotIndex: -1, isInitialLineup: false }); }, [timerSeconds, currentHalf, substitutionPlan, gamePhase, players, acknowledgedPlannedSubSlotIndex, goalieForHalf1, goalieForHalf2]);
+        const generateFullGamePlan = React.useCallback((gamePlayers) => {
+          if (gamePlayers.length === 0) return null;
+          let slotMinutes = SLOT_DURATION_MINUTES;
+          const outfieldCount = gamePlayers.filter(p => p.id !== goalieForHalf1?.id).length;
+          if (outfieldCount === OUTFIELD_PLAYERS_ON_FIELD * 2) {
+            slotMinutes = HALF_DURATION_MINUTES / 2;
+          }
+          const slotSeconds = slotMinutes * 60;
+          const numSlotsPerHalf = Math.floor(HALF_DURATION_SECONDS / slotSeconds);
+          const cumulativePlanStats = {};
+          gamePlayers.forEach(p => {
+            cumulativePlanStats[p.id] = { GK: 0, ON: 0, OFF: 0, name: p.name, number: p.number, playedInH1: false, consecutiveON: 0 };
+          });
+          let planGoalieH1Player = null, planGoalieH2Player = null;
+          let dgOutfieldH1Player = null, dgOutfieldH2Player = null;
+          const dg1 = designatedGoalie1Id ? gamePlayers.find(p => p.id === designatedGoalie1Id) : null;
+          const dg2 = designatedGoalie2Id ? gamePlayers.find(p => p.id === designatedGoalie2Id) : null;
+          if (dg1 && dg2) {
+            planGoalieH1Player = dg1; dgOutfieldH1Player = dg2; planGoalieH2Player = dg2; dgOutfieldH2Player = dg1;
+          } else if (dg1) {
+            planGoalieH1Player = dg1; dgOutfieldH2Player = dg1; const potentialH2Goalies = gamePlayers.filter(p => p.id !== dg1.id);
+            if (potentialH2Goalies.length > 0) planGoalieH2Player = potentialH2Goalies[0]; else planGoalieH2Player = dg1;
+          } else {
+            planGoalieH1Player = goalieForHalf1; planGoalieH2Player = goalieForHalf2;
+          }
+          if (goalieForHalf1 && gamePlayers.find(p=>p.id === goalieForHalf1.id)) planGoalieH1Player = goalieForHalf1;
+          const h1Slots = planGoalieH1Player ? generateHalfPlan(gamePlayers, planGoalieH1Player, dgOutfieldH1Player, numSlotsPerHalf, 1, cumulativePlanStats, null) : [];
+          const lastSlotH1Assignments = h1Slots.length > 0 ? h1Slots[h1Slots.length - 1].assignments : null;
+          const actualPlanGoalieH2 = (goalieForHalf2 && gamePlayers.find(p=>p.id === goalieForHalf2.id)) ? goalieForHalf2 : planGoalieH2Player;
+          const h2Slots = actualPlanGoalieH2 ? generateHalfPlan(gamePlayers, actualPlanGoalieH2, dgOutfieldH2Player, numSlotsPerHalf, 2, cumulativePlanStats, lastSlotH1Assignments) : [];
+          setSubstitutionPlan({ half1: h1Slots, half2: h2Slots, totalPlayerSlotCounts: cumulativePlanStats, slotDurationMinutes: slotMinutes });
+          setPlanDeviated(false);
+          setAcknowledgedPlannedSubSlotIndex(-1);
+        }, [designatedGoalie1Id, designatedGoalie2Id, goalieForHalf1, goalieForHalf2, generateHalfPlan]);
+        React.useEffect(() => {
+          if (!substitutionPlan || !(gamePhase.includes('Playing') || gamePhase.includes('PreHalf'))) {
+            setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false });
+            return;
+          }
+          const currentPlanHalfData = currentHalf === 1 ? substitutionPlan.half1 : substitutionPlan.half2;
+          if (!currentPlanHalfData || currentPlanHalfData.length === 0) {
+            setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false });
+            return;
+          }
+          const slotSeconds = (substitutionPlan.slotDurationMinutes || SLOT_DURATION_MINUTES) * 60;
+          let firstRelevantSlotIndex = acknowledgedPlannedSubSlotIndex + 1;
+          if ((gamePhase.includes('PreHalf1') || gamePhase.includes('PreHalf2')) && acknowledgedPlannedSubSlotIndex === -1) {
+            firstRelevantSlotIndex = 0;
+          }
+          let foundNextSub = false;
+          for (let slotIdx = firstRelevantSlotIndex; slotIdx < currentPlanHalfData.length; slotIdx++) {
+            const prevSlotAssignments = (slotIdx === 0) ? (currentHalf === 2 && substitutionPlan.half1.length > 0 ? substitutionPlan.half1[substitutionPlan.half1.length -1].assignments : {}) : currentPlanHalfData[slotIdx - 1].assignments;
+            const targetSlotAssignments = currentPlanHalfData[slotIdx].assignments;
+            const playersPlannedOff = [];
+            const playersPlannedOn = [];
+            players.forEach(player => {
+              const prevStatus = prevSlotAssignments[player.id];
+              const targetStatus = targetSlotAssignments[player.id];
+              if (slotIdx === 0 && targetStatus === 'ON' && player.id !== (currentHalf === 1 ? goalieForHalf1?.id : goalieForHalf2?.id) ) {
+                playersPlannedOn.push(player);
+              } else if (slotIdx > 0) {
+                if (prevStatus === 'ON' && targetStatus !== 'ON') playersPlannedOff.push(player);
+                else if (prevStatus !== 'ON' && targetStatus === 'ON') playersPlannedOn.push(player);
+              }
+            });
+            const isInitial = (slotIdx === 0 && acknowledgedPlannedSubSlotIndex === -1);
+            if (playersPlannedOff.length > 0 || playersPlannedOn.length > 0 || isInitial) {
+              setNextPlannedSubInfo({ timeString: formatTime(slotIdx * slotSeconds), playersComingOff: playersPlannedOff, playersGoingOn: playersPlannedOn, isApplicable: true, slotIndex: slotIdx, isInitialLineup: isInitial });
+              foundNextSub = true;
+              break;
+            }
+          }
+          if (!foundNextSub) {
+            setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: currentPlanHalfData.length > 0 ? 'End of Half' : '', slotIndex: -1, isInitialLineup: false });
+          }
+        }, [timerSeconds, currentHalf, substitutionPlan, gamePhase, players, acknowledgedPlannedSubSlotIndex, goalieForHalf1, goalieForHalf2]);
         const handleSetupModeSelect = (mode) => { setSetupMode(mode); if (mode === 'manual') setPlayers([]); };
         const handleDefaultPlayerToggle = (playerId) => { setAvailableDefaultPlayers(prev => prev.map(p => p.id === playerId ? {...p, isPlayingToday: !p.isPlayingToday} : p)); };
         const handleDefaultPlayerDetailChange = (playerId, field, value) => { setAvailableDefaultPlayers(prev => prev.map(p => p.id === playerId ? {...p, [field]: value} : p)); };
@@ -396,8 +487,46 @@
         };
 
         // ...existing code...
-        const SubstitutionPlanTable = ({ plan, playersList }) => { /* ... (same) ... */ if (!plan || !plan.half1 || !plan.half2 || !plan.totalPlayerSlotCounts) return <p className="text-center text-orange-400 mt-4">Substitution plan not fully generated or available.</p>; const numSlotsPerHalf = Math.floor(HALF_DURATION_SECONDS / SLOT_DURATION_SECONDS); const headerSlots = Array.from({length: numSlotsPerHalf * 2}, (_, i) => `${String(i*SLOT_DURATION_MINUTES).padStart(2,'0')}-${String((i+1)*SLOT_DURATION_MINUTES).padStart(2,'0')}'`); return (<div className="mt-6 overflow-x-auto"><h3 className="text-2xl font-semibold text-center text-teal-300 mb-3">Suggested Substitution Plan</h3><table className="min-w-full text-sm text-left text-gray-300 bg-gray-700 rounded-md"><thead className="bg-gray-600"><tr><th className="px-3 py-2">Player</th>{headerSlots.map(s=><th key={s} className="px-2 py-2 text-center">{s}</th>)}<th className="px-3 py-2 text-center">ON</th><th className="px-3 py-2 text-center">GK</th></tr></thead><tbody>{playersList.map(player => { const stats = plan.totalPlayerSlotCounts[player.id] || { ON: 0, GK: 0, name: player.name, number: player.number }; return (<tr key={player.id} className="border-b border-gray-600 hover:bg-gray-600/50"><td className="px-3 py-2 font-medium whitespace-nowrap">{stats.name} (#{stats.number || 'N/A'})</td>{plan.half1.map((slot, idx) => (<td key={`h1s${idx}-${player.id}`} className={`px-2 py-2 text-center font-semibold ${slot.assignments[player.id]==='GK'?'bg-yellow-500 text-black':slot.assignments[player.id]==='ON'?'bg-green-700':'bg-gray-500'}`}>{slot.assignments[player.id]}</td>))}{plan.half2.map((slot, idx) => (<td key={`h2s${idx}-${player.id}`} className={`px-2 py-2 text-center font-semibold ${slot.assignments[player.id]==='GK'?'bg-yellow-500 text-black':slot.assignments[player.id]==='ON'?'bg-green-700':'bg-gray-500'}`}>{slot.assignments[player.id]}</td>))}<td className="px-3 py-2 text-center">{stats.ON}</td><td className="px-3 py-2 text-center">{stats.GK}</td></tr>);})}</tbody></table></div>);};
-        const renderNextPlannedSub = () => { /* ... (same) ... */ if (!nextPlannedSubInfo.isApplicable || !(gamePhase.includes("Playing") || gamePhase.includes("PreHalf"))) return null; const titleText = nextPlannedSubInfo.isInitialLineup ? `Planned Starting Lineup at ~${nextPlannedSubInfo.timeString}` : `Next Planned Sub at ~${nextPlannedSubInfo.timeString}`; const buttonText = nextPlannedSubInfo.isInitialLineup ? "Confirm Starting Lineup" : "Execute This Planned Substitution"; const goalieForDisplay = currentHalf === 1 ? goalieForHalf1 : goalieForHalf2; return (<div className="my-4 p-4 bg-gray-700 rounded-lg shadow"><h4 className="text-lg font-semibold text-center text-cyan-400 mb-2">{titleText}{nextPlannedSubInfo.slotIndex !== -1 && !nextPlannedSubInfo.isInitialLineup && ` (Slot ${nextPlannedSubInfo.slotIndex + 1})`}</h4>{planDeviated && <p className="text-center text-xs text-yellow-400 mb-2">(Plan deviated. Planned subs are based on original plan.)</p>}{ goalieForDisplay && nextPlannedSubInfo.isInitialLineup && <p className="text-center text-sm text-yellow-300 mb-1">Goalie: {goalieForDisplay.name} (#{goalieForDisplay.number || 'N/A'})</p> }{(nextPlannedSubInfo.playersComingOff.length === 0 && nextPlannedSubInfo.playersGoingOn.length === 0 && !nextPlannedSubInfo.isInitialLineup) ? (<p className="text-center text-gray-400">No changes or current lineup matches next phase of plan.</p>) : (<><div className="grid grid-cols-2 gap-4">{nextPlannedSubInfo.playersComingOff.length > 0 && (<div><p className="font-medium text-red-400">Coming OFF (Outfield):</p><ul className="list-disc list-inside ml-1 text-sm">{nextPlannedSubInfo.playersComingOff.map(p => <li key={`off-${p.id}`}>{p.name} (#{p.number || 'N/A'})</li>)}</ul></div>)}{nextPlannedSubInfo.playersGoingOn.length > 0 && (<div><p className="font-medium text-green-400">Going ON (Outfield):</p><ul className="list-disc list-inside ml-1 text-sm">{nextPlannedSubInfo.playersGoingOn.map(p => <li key={`on-${p.id}`}>{p.name} (#{p.number || 'N/A'})</li>)}</ul></div>)}</div><button onClick={executePlannedSubstitution} className="mt-3 w-full py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md text-sm">{buttonText}</button></>)}</div>);};
+        const SubstitutionPlanTable = ({ plan, playersList }) => {
+          if (!plan || !plan.half1 || !plan.half2 || !plan.totalPlayerSlotCounts) return <p className="text-center text-orange-400 mt-4">Substitution plan not fully generated or available.</p>;
+          const slotMinutes = plan.slotDurationMinutes || SLOT_DURATION_MINUTES;
+          const numSlotsPerHalf = Math.floor(HALF_DURATION_MINUTES / slotMinutes);
+          const headerSlots = Array.from({length: numSlotsPerHalf * 2}, (_, i) => `${String(i*slotMinutes).padStart(2,'0')}-${String((i+1)*slotMinutes).padStart(2,'0')}`);
+          return (
+            <div className="mt-6 overflow-x-auto">
+              <h3 className="text-2xl font-semibold text-center text-teal-300 mb-3">Suggested Substitution Plan</h3>
+              <table className="min-w-full text-sm text-left text-gray-300 bg-gray-700 rounded-md">
+                <thead className="bg-gray-600">
+                  <tr>
+                    <th className="px-3 py-2">Player</th>
+                    {headerSlots.map(s => <th key={s} className="px-2 py-2 text-center">{s}</th>)}
+                    <th className="px-3 py-2 text-center">ON</th>
+                    <th className="px-3 py-2 text-center">GK</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {playersList.map(player => {
+                    const stats = plan.totalPlayerSlotCounts[player.id] || { ON: 0, GK: 0, name: player.name, number: player.number };
+                    return (
+                      <tr key={player.id} className="border-b border-gray-600 hover:bg-gray-600/50">
+                        <td className="px-3 py-2 font-medium whitespace-nowrap">{stats.name} (#{stats.number || 'N/A'})</td>
+                        {plan.half1.map((slot, idx) => (
+                          <td key={`h1s${idx}-${player.id}`} className={`px-2 py-2 text-center font-semibold ${slot.assignments[player.id]==='GK'?'bg-yellow-500 text-black':slot.assignments[player.id]==='ON'?'bg-green-700':'bg-gray-500'}`}>{slot.assignments[player.id]}</td>
+                        ))}
+                        {plan.half2.map((slot, idx) => (
+                          <td key={`h2s${idx}-${player.id}`} className={`px-2 py-2 text-center font-semibold ${slot.assignments[player.id]==='GK'?'bg-yellow-500 text-black':slot.assignments[player.id]==='ON'?'bg-green-700':'bg-gray-500'}`}>{slot.assignments[player.id]}</td>
+                        ))}
+                        <td className="px-3 py-2 text-center">{stats.ON}</td>
+                        <td className="px-3 py-2 text-center">{stats.GK}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+        const renderNextPlannedSub = () => { /* ... (same) ... */ if (!nextPlannedSubInfo.isApplicable || !(gamePhase.includes("Playing") || gamePhase.includes("PreHalf"))) return null; const titleText = nextPlannedSubInfo.isInitialLineup ? `Planned Starting Lineup at ~${nextPlannedSubInfo.timeString}` : `Next Planned Sub at ~${nextPlannedSubInfo.timeString}`; const buttonText = nextPlannedSubInfo.isInitialLineup ? "Confirm Starting Lineup" : "Execute This Planned Substitution"; const goalieForDisplay = currentHalf === 1 ? goalieForHalf1 : goalieForHalf2; return (<div className="my-4 p-4 bg-gray-700 rounded-lg shadow"><h4 className="text-lg font-semibold text-center text-cyan-400 mb-2">{titleText}{nextPlannedSubInfo.slotIndex !== -1 && !nextPlannedSubInfo.isInitialLineup && ` (Slot ${nextPlannedSubInfo.slotIndex + 1})`}</h4>{planDeviated && <p className="text-center text-xs text-yellow-400 mb-2">(Plan deviated. Planned subs are based on original plan.)</p>}{ goalieForDisplay && nextPlannedSubInfo.isInitialLineup && <p className="text-center text-sm text-yellow-300 mb-1">Goalie: {goalieForDisplay.name} (#{goalieForDisplay.number || 'N/A'})</p> }{(nextPlannedSubInfo.playersComingOff.length === 0 && nextPlannedSubInfo.playersGoingOn.length === 0 && !nextPlannedSubInfo.isInitialLineup) ? (<p className="text-center text-gray-400">No changes or current lineup matches next phase of plan.</p>) : (<><div className="grid grid-cols-2 gap-4">{nextPlannedSubInfo.playersComingOff.length > 0 && (<div><p className="font-medium text-red-400">Coming OFF (Outfield):</p><ul className="list-disc list-inside ml-1 text-sm">{nextPlannedSubInfo.playersComingOff.map(p => <li key={`off-${p.id}`}>{p.name} (#{p.number || 'N/A'})</li>)}</ul></div>)}{nextPlannedSubInfo.playersGoingOn.length > 0 && (<div><p className="font-medium text-green-400">Going ON (Outfield):</p><ul className="list-disc list-inside ml-1 text-sm">{nextPlannedSubInfo.playersGoingOn.map(p => <li key={`on-${p.id}`}>{p.name} (#{p.number || 'N/A'})</li>)}</ul></div>)}</div><button onClick={executePlannedSubstitution} className="mt-3 w-full py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg shadow-md text-sm">{buttonText}</button></>)} </div>);};
         const renderGameScreen = () => { /* ... (same) ... */ const currentGoalie = activePlayers.find(p => p.status === 'Goalie'); const onFieldPlayers = activePlayers.filter(p => p.status === 'Field'); const onBenchPlayers = activePlayers.filter(p => p.status === 'Bench' && p.playerId !== currentGoalie?.playerId); const dg1 = players.find(p => p.id === designatedGoalie1Id); const dg2 = players.find(p => p.id === designatedGoalie2Id); const nonGoaliePlayingOutfieldCount = players.length - (dg1 && dg2 ? 2 : dg1 || dg2 ? 1 : 0); return (<div className="p-4 md:p-6 space-y-4 bg-gray-800 text-white rounded-lg shadow-xl"><div className="text-center"><h2 className="text-3xl font-bold text-teal-400">{currentHalf === 1 ? 'First Half' : 'Second Half'}{gamePhase.includes('Pre') && ' - Lineup'}</h2><p className="text-5xl font-mono my-3 text-yellow-400">{formatTime(timerSeconds)}</p>{gamePhase.includes('Playing') && isTimerRunning && substitutionPlan?.totalPlayerSlotCounts && players.length > 0 && (<p className="text-sm text-gray-400">Approx Target Outfield Slots: {nonGoaliePlayingOutfieldCount > 0 ? Math.round(Object.values(substitutionPlan.totalPlayerSlotCounts).filter(stat => !((dg1 && stat.name === dg1.name) || (dg2 && stat.name === dg2.name))).reduce((sum, p) => sum + p.ON, 0) / nonGoaliePlayingOutfieldCount) : 'N/A'}</p>)}</div><div className="flex justify-center space-x-2 my-2"><button onClick={() => handleTimeAdjustment(-60)} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">Rewind 1m</button><button onClick={() => handleTimeAdjustment(60)} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">FFwd 1m</button><button onClick={() => handleTimeAdjustment(300)} className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs">FFwd 5m</button></div>{gamePhase === 'PreHalf1' && !isTimerRunning && (<button onClick={handleGeneratePepTalk} disabled={geminiIsLoading} className="w-full mb-2 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50">{geminiIsLoading ? 'Generating...' : '✨ Generate Pep Talk ✨'}</button>)}{!isTimerRunning && (gamePhase === 'PreHalf1' || gamePhase === 'PreHalf2') && (<button onClick={startGameHalf} className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg shadow-md">Start {currentHalf === 1 ? 'First Half' : 'Second Half'}</button>)}{isTimerRunning && <button onClick={handlePause} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg shadow-md">Pause Timer</button>}{!isTimerRunning && (gamePhase.includes("Playing")) && (<button onClick={handleResume} className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg shadow-md mt-2">Resume Timer</button>)}{renderNextPlannedSub()}{(gamePhase.includes("PreHalf") || gamePhase.includes("Playing")) && (<button onClick={() => setShowPitchView(!showPitchView)} className="mt-3 w-full py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">{showPitchView ? 'Hide Pitch View' : 'Show Pitch View'}</button>)}{substitutionPlan && (gamePhase.includes('Pre') || gamePhase.includes('Playing')) && (<button onClick={() => setShowPlanTable(!showPlanTable)} className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">{showPlanTable ? 'Hide' : 'Show'} Substitution Plan</button>)}{showPlanTable && substitutionPlan && <SubstitutionPlanTable plan={substitutionPlan} playersList={players} />}{showPitchView && (gamePhase.includes("PreHalf") || gamePhase.includes("Playing")) ? (<SoccerPitchView activePlayers={activePlayers} onPlayerMove={togglePlayerFieldStatus} goalie={currentGoalie} pitchPlayerPositions={pitchPlayerPositions} setPitchPlayerPositions={setPitchPlayerPositions} pitchDisplayMode={pitchDisplayMode} setPitchDisplayMode={setPitchDisplayMode} />) : (<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3"><div><h3 className="text-xl font-semibold mb-2 text-yellow-300">Goalie</h3>{currentGoalie ? renderPlayerCard(currentGoalie) : <p className="text-gray-400">N/A</p>}</div><div><h3 className="text-xl font-semibold mb-2 text-green-300">On Field ({onFieldPlayers.length}/{OUTFIELD_PLAYERS_ON_FIELD})</h3>{onFieldPlayers.map(renderPlayerCard)}</div><div><h3 className="text-xl font-semibold mb-2 text-gray-300">Bench</h3>{onBenchPlayers.map(renderPlayerCard)}</div></div>)}</div>);};
         const renderHalfTime = () => { /* ... (same) ... */ const dg1 = players.find(p => p.id === designatedGoalie1Id); const dg2 = players.find(p => p.id === designatedGoalie2Id); return (<div className="p-6 space-y-6 bg-gray-800 text-white rounded-lg shadow-xl text-center"><h2 className="text-3xl font-bold text-teal-400">Half Time!</h2><p className="text-xl">First half completed.</p>{goalieForHalf1 && dg1 && goalieForHalf1.id === dg1.id && dg2 && (<p className="text-md text-gray-300">{dg1.name} was goalie. {dg2.name} will be goalie for 2nd half.</p>)}{goalieForHalf1 && dg1 && goalieForHalf1.id === dg1.id && !dg2 && (<p className="text-md text-gray-300">{dg1.name} played goalie and will be outfield. <span className="font-bold text-yellow-300">Select 2nd half goalie.</span></p>)}<button onClick={handleGenerateHalftimeMessage} disabled={geminiIsLoading} className="w-full max-w-xs mx-auto mt-2 mb-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50">{geminiIsLoading ? 'Generating...' : '✨ Generate Halftime Message ✨'}</button>{dg1 && !dg2 && (<div className="my-4 p-3 bg-gray-700 rounded-md"><label htmlFor="h2GoalieSelect" className="block text-sm font-medium text-yellow-300 mb-1">Select Goalie for 2nd Half:</label><select id="h2GoalieSelect" onChange={(e) => setGoalieForHalf2(players.find(p => p.id === e.target.value) || null)} value={goalieForHalf2?.id || ""} className="w-full p-2 bg-gray-600 border border-gray-500 rounded-md text-white focus:ring-teal-500 focus:border-teal-500"><option value="">-- Select --</option>{players.filter(p => p.id !== dg1.id).map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>)}<button onClick={proceedToSecondHalf} disabled={dg1 && !dg2 && !goalieForHalf2} className="w-full max-w-xs mx-auto py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md disabled:opacity-50">Set Up Second Half</button>{substitutionPlan && (<button onClick={() => setShowPlanTable(!showPlanTable)} className="mt-4 w-full max-w-xs mx-auto py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">{showPlanTable ? 'Hide' : 'Show'} Plan</button>)}{showPlanTable && substitutionPlan && <SubstitutionPlanTable plan={substitutionPlan} playersList={players} />}<button onClick={resetGame} className="w-full max-w-xs mx-auto mt-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md">Reset Game</button></div>);};
         const renderFullTime = () => ( <div className="p-6 space-y-6 bg-gray-800 text-white rounded-lg shadow-xl text-center"><h2 className="text-3xl font-bold text-teal-400">Full Time!</h2><p className="text-xl mb-6">Match Ended.</p><h3 className="text-2xl font-semibold mb-3 text-yellow-300">Player Stats (Actual Play Time):</h3><div className="space-y-3 max-w-md mx-auto text-left">{Object.values(playerStats).sort((a,b) => a.name.localeCompare(b.name)).map(stats => (<div key={stats.name + stats.number} className="p-3 bg-gray-700 rounded-md shadow"><p className="font-semibold text-lg">{stats.name} (#{stats.number || 'N/A'})</p><p className="text-sm text-gray-300">Outfield: {formatTime(stats.outfield)}</p><p className="text-sm text-gray-300">Goalie: {formatTime(stats.goalie)}</p></div>))}</div>{substitutionPlan && (<button onClick={() => setShowPlanTable(!showPlanTable)} className="mt-6 w-full max-w-xs mx-auto py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">{showPlanTable ? 'Hide' : 'Show'} Final Plan</button>)}{showPlanTable && substitutionPlan && <SubstitutionPlanTable plan={substitutionPlan} playersList={players} />}<button onClick={resetGame} className="w-full max-w-xs mx-auto mt-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md">Start New Game</button></div>);
