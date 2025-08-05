@@ -77,6 +77,8 @@
         const [showPitchView, setShowPitchView] = React.useState(false);
         const [pitchPlayerPositions, setPitchPlayerPositions] = React.useState({});
         const [pitchDisplayMode, setPitchDisplayMode] = React.useState('name');
+        const [half2PlayerStartTimes, setHalf2PlayerStartTimes] = React.useState({});
+        const [half2PlayerAccumulated, setHalf2PlayerAccumulated] = React.useState({});
 
         const callGeminiAPI = async (prompt) => { setGeminiIsLoading(true); setModalMessage(''); const apiKey = ""; const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`; const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, topK: 1, topP: 1, maxOutputTokens: 200 } }; try { const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { const errorData = await response.json(); console.error("Gemini API Error:", errorData); throw new Error(`API Error: ${response.status} ${errorData?.error?.message || response.statusText}`); } const result = await response.json(); setGeminiIsLoading(false); if (result.candidates?.[0]?.content?.parts?.[0]?.text) { return result.candidates[0].content.parts[0].text; } else { console.error("Unexpected response structure from Gemini API:", result); throw new Error("Could not extract text from Gemini API response."); } } catch (error) { setGeminiIsLoading(false); console.error("Error calling Gemini API:", error); setModalTitle("API Error"); setModalMessage(`Could not generate content: ${error.message}. Please try again later.`); setShowModal(true); return null; } };
         const handleGeneratePepTalk = async () => { const teamName = "our awesome team"; const prompt = `Generate a very short, fun, and encouraging pep talk (2-3 sentences) for an under-8 co-ed soccer team called "${teamName}" before their game. Focus on teamwork, trying their best, and having fun.`; const talk = await callGeminiAPI(prompt); if (talk) { setModalTitle("✨ Pre-Game Pep Talk ✨"); setModalMessage(talk); setShowModal(true); } };
@@ -154,7 +156,7 @@
           setShowLineupSelector(true);
         };
         const initializePlayerStats = React.useCallback((gamePlayers) => { const initialStats = {}; gamePlayers.forEach(p => { initialStats[p.id] = { name: p.name, number:p.number, outfield: 0, goalie: 0 }; }); setPlayerStats(initialStats); }, []);
-        const setupHalf = React.useCallback((halfNum) => { setCurrentHalf(halfNum); setTimerSeconds(0); setElapsedOnPause(0); let currentActualGoalie = halfNum === 1 ? goalieForHalf1 : goalieForHalf2; if (!currentActualGoalie) { if (halfNum === 2 && designatedGoalie1Id && !designatedGoalie2Id) { setModalMessage("CRITICAL: Select goalie for 2nd half."); setShowModal(true); setGamePhase('HalfTime'); return; } else { setModalMessage(`Goalie for Half ${halfNum} not defined.`); setShowModal(true); setGamePhase('Setup'); return; } } const halfPlan = halfNum === 1 ? substitutionPlan?.half1 : substitutionPlan?.half2; let initialFieldPlayers = []; if (halfPlan && halfPlan.length > 0 && halfPlan[0].assignments) { const firstSlotAssignments = halfPlan[0].assignments; initialFieldPlayers = players.filter(p => firstSlotAssignments[p.id] === 'ON' && p.id !== currentActualGoalie?.id); } else { const availableForOutfield = players.filter(p => p.id !== currentActualGoalie?.id); initialFieldPlayers = availableForOutfield.slice(0, OUTFIELD_PLAYERS_ON_FIELD); } setActivePlayers(players.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: p.id === currentActualGoalie?.id ? 'Goalie' : initialFieldPlayers.some(fp => fp.id === p.id) ? 'Field' : 'Bench' }))); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); setPitchPlayerPositions({});}, [players, goalieForHalf1, goalieForHalf2, designatedGoalie1Id, designatedGoalie2Id, substitutionPlan]);
+        const setupHalf = React.useCallback((halfNum) => { setCurrentHalf(halfNum); setTimerSeconds(0); setElapsedOnPause(0); if(halfNum === 2){ setHalf2PlayerStartTimes({}); setHalf2PlayerAccumulated({}); } let currentActualGoalie = halfNum === 1 ? goalieForHalf1 : goalieForHalf2; if (!currentActualGoalie) { if (halfNum === 2 && designatedGoalie1Id && !designatedGoalie2Id) { setModalMessage("CRITICAL: Select goalie for 2nd half."); setShowModal(true); setGamePhase('HalfTime'); return; } else { setModalMessage(`Goalie for Half ${halfNum} not defined.`); setShowModal(true); setGamePhase('Setup'); return; } } const halfPlan = halfNum === 1 ? substitutionPlan?.half1 : substitutionPlan?.half2; let initialFieldPlayers = []; if (halfPlan && halfPlan.length > 0 && halfPlan[0].assignments) { const firstSlotAssignments = halfPlan[0].assignments; initialFieldPlayers = players.filter(p => firstSlotAssignments[p.id] === 'ON' && p.id !== currentActualGoalie?.id); } else { const availableForOutfield = players.filter(p => p.id !== currentActualGoalie?.id); initialFieldPlayers = availableForOutfield.slice(0, OUTFIELD_PLAYERS_ON_FIELD); } setActivePlayers(players.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: p.id === currentActualGoalie?.id ? 'Goalie' : initialFieldPlayers.some(fp => fp.id === p.id) ? 'Field' : 'Bench' }))); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); setPitchPlayerPositions({});}, [players, goalieForHalf1, goalieForHalf2, designatedGoalie1Id, designatedGoalie2Id, substitutionPlan]);
         React.useEffect(() => { let interval; if (isTimerRunning) { interval = setInterval(() => { const elapsed = Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause; const newTimerValue = Math.min(elapsed, HALF_DURATION_SECONDS); setTimerSeconds(newTimerValue); if (newTimerValue >= HALF_DURATION_SECONDS) { setIsTimerRunning(false); if (currentHalf === 1) setGamePhase('HalfTime'); else setGamePhase('FullTime'); } }, 1000); } return () => clearInterval(interval); }, [isTimerRunning, halfStartTime, elapsedOnPause, currentHalf]);
         React.useEffect(() => { if (gamePhase === 'PreHalf1') setupHalf(1); else if (gamePhase === 'PreHalf2') setupHalf(2); }, [gamePhase, setupHalf]);
 
@@ -175,12 +177,172 @@
         };
         const handlePause = () => { if (!isTimerRunning) return; setIsTimerRunning(false); const elapsed = Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause; setElapsedOnPause(Math.min(elapsed, HALF_DURATION_SECONDS)); };
         const handleResume = () => { if (isTimerRunning || timerSeconds >= HALF_DURATION_SECONDS) return; setHalfStartTime(Date.now()); setIsTimerRunning(true); };
-        const startGameHalf = () => { const currentActualGoalie = (currentHalf === 1) ? goalieForHalf1 : goalieForHalf2; if (!currentActualGoalie) { setModalMessage(`Goalie for Half ${currentHalf} must be set.`); setShowModal(true); return; } const outfielders = activePlayers.filter(p => p.status === 'Field'); if (outfielders.length !== OUTFIELD_PLAYERS_ON_FIELD) { setModalMessage(`Select ${OUTFIELD_PLAYERS_ON_FIELD} outfield players.`); setShowModal(true); return; } if (nextPlannedSubInfo.isInitialLineup && acknowledgedPlannedSubSlotIndex === -1) { let initialPitchPositions = {}; const outfieldStarters = nextPlannedSubInfo.playersGoingOn; DEFAULT_FORMATION_IDS.forEach((posId, idx) => { if (outfieldStarters[idx]) initialPitchPositions[posId] = outfieldStarters[idx].id; }); setPitchPlayerPositions(initialPitchPositions); setAcknowledgedPlannedSubSlotIndex(0); setPlanDeviated(false); } setHalfStartTime(Date.now()); setElapsedOnPause(0); setIsTimerRunning(true); setGamePhase(currentHalf === 1 ? 'Half1Playing' : 'Half2Playing'); };
-        const togglePlayerFieldStatus = (playerId, newStatusOverride = null) => { const playerToToggle = activePlayers.find(p => p.playerId === playerId); if (!playerToToggle || playerToToggle.status === 'Goalie') return false; const currentFieldPlayersCount = activePlayers.filter(p => p.status === 'Field').length; let newStatus = newStatusOverride; if (!newStatus) newStatus = playerToToggle.status === 'Bench' ? 'Field' : 'Bench'; if (newStatus === 'Field' && playerToToggle.status === 'Bench') { if (currentFieldPlayersCount >= OUTFIELD_PLAYERS_ON_FIELD && !Object.values(pitchPlayerPositions).includes(playerId) ) { setModalMessage(`Max ${OUTFIELD_PLAYERS_ON_FIELD} outfield players.`); setShowModal(true); return false; } } setActivePlayers(prevActive => prevActive.map(p => p.playerId === playerId ? { ...p, status: newStatus } : p)); if (newStatus === 'Bench') { setPitchPlayerPositions(prev => { const newPos = {...prev}; Object.keys(newPos).forEach(posId => { if(newPos[posId] === playerId) delete newPos[posId]; }); return newPos; }); } setPlanDeviated(true); return true; };
-        const executePlannedSubstitution = () => { if (!nextPlannedSubInfo.isApplicable || nextPlannedSubInfo.slotIndex === -1) { setModalMessage("No specific planned substitution to execute now."); setShowModal(true); return; } const targetSlotForExecution = nextPlannedSubInfo.slotIndex; let newActive = [...activePlayers]; let newPitchPos = { ...pitchPlayerPositions }; if (nextPlannedSubInfo.isInitialLineup) { setModalMessage("Starting lineup confirmed."); setShowModal(true); newPitchPos = {}; const outfieldStarters = nextPlannedSubInfo.playersGoingOn; DEFAULT_FORMATION_IDS.forEach((posId, idx) => { if (outfieldStarters[idx]) newPitchPos[posId] = outfieldStarters[idx].id; }); } else { nextPlannedSubInfo.playersComingOff.forEach(pOff => { newActive = newActive.map(p => p.playerId === pOff.id ? { ...p, status: 'Bench' } : p); Object.keys(newPitchPos).forEach(posId => { if (newPitchPos[posId] === pOff.id) delete newPitchPos[posId]; }); }); nextPlannedSubInfo.playersGoingOn.forEach(pOn => { newActive = newActive.map(p => p.playerId === pOn.id ? { ...p, status: 'Field' } : p); let placedOnPitch = false; for (const pos of PITCH_POSITIONS) { if (!Object.values(newPitchPos).includes(pOn.id) && !newPitchPos[pos.id]) { newPitchPos[pos.id] = pOn.id; placedOnPitch = true; break; } } }); setActivePlayers(newActive); } setPitchPlayerPositions(newPitchPos); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(targetSlotForExecution); };
+        const startGameHalf = () => {
+          const currentActualGoalie = (currentHalf === 1) ? goalieForHalf1 : goalieForHalf2;
+          if (!currentActualGoalie) {
+            setModalMessage(`Goalie for Half ${currentHalf} must be set.`);
+            setShowModal(true);
+            return;
+          }
+          const outfielders = activePlayers.filter(p => p.status === 'Field');
+          if (outfielders.length !== OUTFIELD_PLAYERS_ON_FIELD) {
+            setModalMessage(`Select ${OUTFIELD_PLAYERS_ON_FIELD} outfield players.`);
+            setShowModal(true);
+            return;
+          }
+          if (nextPlannedSubInfo.isInitialLineup && acknowledgedPlannedSubSlotIndex === -1) {
+            let initialPitchPositions = {};
+            const outfieldStarters = nextPlannedSubInfo.playersGoingOn;
+            DEFAULT_FORMATION_IDS.forEach((posId, idx) => {
+              if (outfieldStarters[idx]) initialPitchPositions[posId] = outfieldStarters[idx].id;
+            });
+            setPitchPlayerPositions(initialPitchPositions);
+            setAcknowledgedPlannedSubSlotIndex(0);
+            setPlanDeviated(false);
+          }
+          if (currentHalf === 2) {
+            const startTimes = {};
+            const accum = { ...half2PlayerAccumulated };
+            activePlayers.forEach(p => {
+              if (p.status === 'Field' || p.status === 'Goalie') {
+                startTimes[p.playerId] = { status: p.status, start: timerSeconds };
+                if (!accum[p.playerId]) accum[p.playerId] = { outfield: 0, goalie: 0 };
+              }
+            });
+            setHalf2PlayerStartTimes(startTimes);
+            setHalf2PlayerAccumulated(accum);
+          }
+          setHalfStartTime(Date.now());
+          setElapsedOnPause(0);
+          setIsTimerRunning(true);
+          setGamePhase(currentHalf === 1 ? 'Half1Playing' : 'Half2Playing');
+        };
+        const togglePlayerFieldStatus = (playerId, newStatusOverride = null) => {
+          const playerToToggle = activePlayers.find(p => p.playerId === playerId);
+          if (!playerToToggle || playerToToggle.status === 'Goalie') return false;
+          const currentFieldPlayersCount = activePlayers.filter(p => p.status === 'Field').length;
+          let newStatus = newStatusOverride;
+          if (!newStatus) newStatus = playerToToggle.status === 'Bench' ? 'Field' : 'Bench';
+          if (newStatus === 'Field' && playerToToggle.status === 'Bench') {
+            if (currentFieldPlayersCount >= OUTFIELD_PLAYERS_ON_FIELD && !Object.values(pitchPlayerPositions).includes(playerId)) {
+              setModalMessage(`Max ${OUTFIELD_PLAYERS_ON_FIELD} outfield players.`);
+              setShowModal(true);
+              return false;
+            }
+          }
+          if (currentHalf === 2 && gamePhase === 'Half2Playing') {
+            if (playerToToggle.status === 'Field' && newStatus === 'Bench') {
+              const info = half2PlayerStartTimes[playerId];
+              if (info) {
+                const delta = timerSeconds - info.start;
+                const prev = half2PlayerAccumulated[playerId] || { outfield: 0, goalie: 0 };
+                const updated = { outfield: prev.outfield + (info.status === 'Field' ? delta : 0), goalie: prev.goalie + (info.status === 'Goalie' ? delta : 0) };
+                setHalf2PlayerAccumulated(prevAccum => ({ ...prevAccum, [playerId]: updated }));
+                setHalf2PlayerStartTimes(prevStart => { const ns = { ...prevStart }; delete ns[playerId]; return ns; });
+              }
+            } else if (playerToToggle.status === 'Bench' && newStatus === 'Field') {
+              setHalf2PlayerStartTimes(prev => ({ ...prev, [playerId]: { status: 'Field', start: timerSeconds } }));
+              setHalf2PlayerAccumulated(prev => ({ ...prev, [playerId]: prev[playerId] || { outfield: 0, goalie: 0 } }));
+            }
+          }
+          setActivePlayers(prevActive => prevActive.map(p => p.playerId === playerId ? { ...p, status: newStatus } : p));
+          if (newStatus === 'Bench') {
+            setPitchPlayerPositions(prev => { const newPos = { ...prev }; Object.keys(newPos).forEach(posId => { if (newPos[posId] === playerId) delete newPos[posId]; }); return newPos; });
+          }
+          setPlanDeviated(true);
+          return true;
+        };
+        const executePlannedSubstitution = () => {
+          if (!nextPlannedSubInfo.isApplicable || nextPlannedSubInfo.slotIndex === -1) {
+            setModalMessage("No specific planned substitution to execute now.");
+            setShowModal(true);
+            return;
+          }
+          const targetSlotForExecution = nextPlannedSubInfo.slotIndex;
+          let newActive = [...activePlayers];
+          let newPitchPos = { ...pitchPlayerPositions };
+          let updatedStart = half2PlayerStartTimes;
+          let updatedAccum = half2PlayerAccumulated;
+          if (nextPlannedSubInfo.isInitialLineup) {
+            setModalMessage("Starting lineup confirmed.");
+            setShowModal(true);
+            newPitchPos = {};
+            const outfieldStarters = nextPlannedSubInfo.playersGoingOn;
+            DEFAULT_FORMATION_IDS.forEach((posId, idx) => { if (outfieldStarters[idx]) newPitchPos[posId] = outfieldStarters[idx].id; });
+          } else {
+            if (currentHalf === 2 && gamePhase === 'Half2Playing') {
+              updatedStart = { ...half2PlayerStartTimes };
+              updatedAccum = { ...half2PlayerAccumulated };
+            }
+            nextPlannedSubInfo.playersComingOff.forEach(pOff => {
+              newActive = newActive.map(p => p.playerId === pOff.id ? { ...p, status: 'Bench' } : p);
+              Object.keys(newPitchPos).forEach(posId => { if (newPitchPos[posId] === pOff.id) delete newPitchPos[posId]; });
+              if (currentHalf === 2 && gamePhase === 'Half2Playing') {
+                const info = updatedStart[pOff.id];
+                if (info) {
+                  const delta = timerSeconds - info.start;
+                  const prev = updatedAccum[pOff.id] || { outfield: 0, goalie: 0 };
+                  updatedAccum[pOff.id] = {
+                    outfield: prev.outfield + (info.status === 'Field' ? delta : 0),
+                    goalie: prev.goalie + (info.status === 'Goalie' ? delta : 0)
+                  };
+                  delete updatedStart[pOff.id];
+                }
+              }
+            });
+            nextPlannedSubInfo.playersGoingOn.forEach(pOn => {
+              newActive = newActive.map(p => p.playerId === pOn.id ? { ...p, status: 'Field' } : p);
+              let placedOnPitch = false;
+              for (const pos of PITCH_POSITIONS) {
+                if (!Object.values(newPitchPos).includes(pOn.id) && !newPitchPos[pos.id]) {
+                  newPitchPos[pos.id] = pOn.id;
+                  placedOnPitch = true;
+                  break;
+                }
+              }
+              if (currentHalf === 2 && gamePhase === 'Half2Playing') {
+                updatedStart[pOn.id] = { status: 'Field', start: timerSeconds };
+                if (!updatedAccum[pOn.id]) updatedAccum[pOn.id] = { outfield: 0, goalie: 0 };
+              }
+            });
+            if (currentHalf === 2 && gamePhase === 'Half2Playing') {
+              setHalf2PlayerStartTimes(updatedStart);
+              setHalf2PlayerAccumulated(updatedAccum);
+            }
+            setActivePlayers(newActive);
+          }
+          setPitchPlayerPositions(newPitchPos);
+          setPlanDeviated(false);
+          setAcknowledgedPlannedSubSlotIndex(targetSlotForExecution);
+        };
         const proceedToSecondHalf = () => { const h1FinalStats = {}; players.forEach(player => { const activeP = activePlayers.find(ap => ap.playerId === player.id); const timePlayed = isTimerRunning ? Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause : elapsedOnPause; h1FinalStats[player.id] = { name: player.name, number: player.number, outfield: (activeP && activeP.status === 'Field') ? timePlayed : 0, goalie: (activeP && activeP.status === 'Goalie') ? timePlayed : 0 }; }); setPlayerStats(h1FinalStats); setTimerSeconds(0); setElapsedOnPause(0); if (designatedGoalie1Id && !designatedGoalie2Id && !goalieForHalf2) { setModalMessage("Please select goalie for 2nd half."); setShowModal(true); return; } if (goalieForHalf2) generateFullGamePlan(players); setGamePhase('PreHalf2'); };
-        const finishGame = () => { const finalCumulativeStats = {}; const h2ActualDuration = timerSeconds; players.forEach(player => { const h1PlayerStats = playerStats[player.id] || { name: player.name, number: player.number, outfield: 0, goalie: 0 }; const activeP_H2 = activePlayers.find(ap => ap.playerId === player.id); const outfieldH2 = (activeP_H2 && activeP_H2.status === 'Field') ? h2ActualDuration : 0; const goalieH2 = (activeP_H2 && activeP_H2.status === 'Goalie') ? h2ActualDuration : 0; finalCumulativeStats[player.id] = { name: player.name, number: player.number, outfield: h1PlayerStats.outfield + outfieldH2, goalie: h1PlayerStats.goalie + goalieH2, }; }); setPlayerStats(finalCumulativeStats); setGamePhase('FullTime'); setIsTimerRunning(false); };
-        const resetGame = () => { setSetupMode(null); setGamePhase('Setup'); setPlayers([]); setDesignatedGoalie1Id(null); setDesignatedGoalie2Id(null); setGoalieForHalf1(null); setGoalieForHalf2(null); setCurrentHalf(1); setTimerSeconds(0); setElapsedOnPause(0); setIsTimerRunning(false); setActivePlayers([]); setPlayerStats({}); setSubstitutionPlan(null); setShowPlanTable(false); setPlanDeviated(false); setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); setAcknowledgedPlannedSubSlotIndex(-1); setShowPitchView(false); setPitchPlayerPositions({}); setAvailableDefaultPlayers(DEFAULT_ROSTER.map(p => ({ ...p, isPlayingToday: true, originalId: p.id }))); };
+        const finishGame = () => {
+          const finalAccum = { ...half2PlayerAccumulated };
+          Object.keys(half2PlayerStartTimes).forEach(pid => {
+            const info = half2PlayerStartTimes[pid];
+            const delta = timerSeconds - info.start;
+            const prev = finalAccum[pid] || { outfield: 0, goalie: 0 };
+            finalAccum[pid] = {
+              outfield: prev.outfield + (info.status === 'Field' ? delta : 0),
+              goalie: prev.goalie + (info.status === 'Goalie' ? delta : 0)
+            };
+          });
+          const finalCumulativeStats = {};
+          players.forEach(player => {
+            const h1PlayerStats = playerStats[player.id] || { name: player.name, number: player.number, outfield: 0, goalie: 0 };
+            const h2Stats = finalAccum[player.id] || { outfield: 0, goalie: 0 };
+            finalCumulativeStats[player.id] = {
+              name: player.name,
+              number: player.number,
+              outfield: h1PlayerStats.outfield + h2Stats.outfield,
+              goalie: h1PlayerStats.goalie + h2Stats.goalie,
+            };
+          });
+          setPlayerStats(finalCumulativeStats);
+          setGamePhase('FullTime');
+          setIsTimerRunning(false);
+        };
+        const resetGame = () => { setSetupMode(null); setGamePhase('Setup'); setPlayers([]); setDesignatedGoalie1Id(null); setDesignatedGoalie2Id(null); setGoalieForHalf1(null); setGoalieForHalf2(null); setCurrentHalf(1); setTimerSeconds(0); setElapsedOnPause(0); setIsTimerRunning(false); setActivePlayers([]); setPlayerStats({}); setSubstitutionPlan(null); setShowPlanTable(false); setPlanDeviated(false); setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); setAcknowledgedPlannedSubSlotIndex(-1); setShowPitchView(false); setPitchPlayerPositions({}); setAvailableDefaultPlayers(DEFAULT_ROSTER.map(p => ({ ...p, isPlayingToday: true, originalId: p.id }))); setHalf2PlayerStartTimes({}); setHalf2PlayerAccumulated({}); };
         const handleTimeAdjustment = (secondsAdjustment) => { if(isTimerRunning) { setHalfStartTime(prev => prev - (secondsAdjustment * 1000)); } else { const newElapsed = Math.max(0, Math.min(HALF_DURATION_SECONDS, elapsedOnPause + secondsAdjustment)); setElapsedOnPause(newElapsed); setTimerSeconds(newElapsed); } };
 
         const renderPlayerCard = (player) => { let timeThisHalf = 0; if(isTimerRunning && (player.status === 'Field' || player.status === 'Goalie')) { timeThisHalf = Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause; } else if (!isTimerRunning && (player.status === 'Field' || player.status === 'Goalie')) { timeThisHalf = elapsedOnPause; } else { /* Player is benched, don't update their time based on current running clock */ } const outfieldTimeThisHalf = player.status === 'Field' ? timeThisHalf : 0; const goalieTimeThisHalf = player.status === 'Goalie' ? timeThisHalf : 0; let displayTotalOutfieldTime = 0; if (gamePhase === 'FullTime') { displayTotalOutfieldTime = playerStats[player.playerId]?.outfield || 0; } else if (currentHalf === 1) { displayTotalOutfieldTime = outfieldTimeThisHalf; } else { displayTotalOutfieldTime = (playerStats[player.playerId]?.outfield || 0) + outfieldTimeThisHalf; } let displayTotalGoalieTime = 0; if (gamePhase === 'FullTime') { displayTotalGoalieTime = playerStats[player.playerId]?.goalie || 0; } else if (currentHalf === 1 && player.status === 'Goalie') { displayTotalGoalieTime = goalieTimeThisHalf; } else if (currentHalf === 2) { displayTotalGoalieTime = (playerStats[player.playerId]?.goalie || 0) + goalieTimeThisHalf; } return (<div key={player.playerId} className={`p-3 rounded-lg shadow mb-2 ${player.status === 'Field' ? 'bg-green-600' : player.status === 'Bench' ? 'bg-gray-600' : 'bg-yellow-500 text-black'}`}><h4 className="font-semibold">{player.name} (#{player.number || 'N/A'}) - {player.status}</h4>{player.status !== 'Goalie' && (<> <p className="text-sm">Outfield (This Half): {formatTime(outfieldTimeThisHalf)}</p> {(currentHalf === 2 || gamePhase === 'FullTime') && <p className="text-xs text-gray-200">Outfield (Total Game): {formatTime(displayTotalOutfieldTime)}</p>} </>)}{player.status === 'Goalie' && (<> <p className="text-sm">Goalie (This Half): {formatTime(goalieTimeThisHalf)}</p> {(currentHalf === 2 || gamePhase === 'FullTime') && <p className="text-xs text-gray-200">Goalie (Total Game): {formatTime(displayTotalGoalieTime)}</p>} </>)}{(gamePhase.includes('Playing') || gamePhase.includes('Pre')) && player.status !== 'Goalie' && !showPitchView && (<button onClick={() => togglePlayerFieldStatus(player.playerId)} className={`mt-2 w-full text-xs py-1 px-2 rounded ${player.status === 'Field' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'} text-white`}>{player.status === 'Field' ? 'Move to Bench' : 'Move to Field'}</button>)}</div>);};
