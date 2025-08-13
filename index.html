@@ -115,7 +115,86 @@
             }
             return halfSlotsData;
         }, []);
-        const generateFullGamePlan = React.useCallback((gamePlayers) => { if (gamePlayers.length === 0) return null; const numSlotsPerHalf = Math.floor(HALF_DURATION_SECONDS / SLOT_DURATION_SECONDS); const cumulativePlanStats = {}; gamePlayers.forEach(p => { cumulativePlanStats[p.id] = { GK: 0, ON: 0, OFF: 0, name: p.name, number: p.number, playedInH1: false, consecutiveON: 0 }; }); let planGoalieH1Player = null, planGoalieH2Player = null; let dgOutfieldH1Player = null, dgOutfieldH2Player = null; const dg1 = designatedGoalie1Id ? gamePlayers.find(p => p.id === designatedGoalie1Id) : null; const dg2 = designatedGoalie2Id ? gamePlayers.find(p => p.id === designatedGoalie2Id) : null; if (dg1 && dg2) { planGoalieH1Player = dg1; dgOutfieldH1Player = dg2; planGoalieH2Player = dg2; dgOutfieldH2Player = dg1; } else if (dg1) { planGoalieH1Player = dg1; dgOutfieldH2Player = dg1; const potentialH2Goalies = gamePlayers.filter(p => p.id !== dg1.id); if (potentialH2Goalies.length > 0) planGoalieH2Player = potentialH2Goalies[0]; else planGoalieH2Player = dg1; } else { planGoalieH1Player = goalieForHalf1; planGoalieH2Player = goalieForHalf2; } if (goalieForHalf1 && gamePlayers.find(p=>p.id === goalieForHalf1.id)) planGoalieH1Player = goalieForHalf1; const h1Slots = planGoalieH1Player ? generateHalfPlan(gamePlayers, planGoalieH1Player, dgOutfieldH1Player, numSlotsPerHalf, 1, cumulativePlanStats, null) : []; const lastSlotH1Assignments = h1Slots.length > 0 ? h1Slots[h1Slots.length - 1].assignments : null; const actualPlanGoalieH2 = (goalieForHalf2 && gamePlayers.find(p=>p.id === goalieForHalf2.id)) ? goalieForHalf2 : planGoalieH2Player; const h2Slots = actualPlanGoalieH2 ? generateHalfPlan(gamePlayers, actualPlanGoalieH2, dgOutfieldH2Player, numSlotsPerHalf, 2, cumulativePlanStats, lastSlotH1Assignments) : []; setSubstitutionPlan({ half1: h1Slots, half2: h2Slots, totalPlayerSlotCounts: cumulativePlanStats }); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); }, [designatedGoalie1Id, designatedGoalie2Id, goalieForHalf1, goalieForHalf2, generateHalfPlan]);
+        const generateFullGamePlan = React.useCallback((gamePlayers, startingLineup = null) => {
+          if (gamePlayers.length === 0) return null;
+          const numSlotsPerHalf = Math.floor(HALF_DURATION_SECONDS / SLOT_DURATION_SECONDS);
+          const cumulativePlanStats = {};
+          gamePlayers.forEach(p => {
+            cumulativePlanStats[p.id] = { GK: 0, ON: 0, OFF: 0, name: p.name, number: p.number, playedInH1: false, consecutiveON: 0 };
+          });
+          let planGoalieH1Player = null, planGoalieH2Player = null;
+          let dgOutfieldH1Player = null, dgOutfieldH2Player = null;
+          const dg1 = designatedGoalie1Id ? gamePlayers.find(p => p.id === designatedGoalie1Id) : null;
+          const dg2 = designatedGoalie2Id ? gamePlayers.find(p => p.id === designatedGoalie2Id) : null;
+          if (dg1 && dg2) {
+            planGoalieH1Player = dg1; dgOutfieldH1Player = dg2; planGoalieH2Player = dg2; dgOutfieldH2Player = dg1;
+          } else if (dg1) {
+            planGoalieH1Player = dg1; dgOutfieldH2Player = dg1;
+            const potentialH2Goalies = gamePlayers.filter(p => p.id !== dg1.id);
+            planGoalieH2Player = potentialH2Goalies.length > 0 ? potentialH2Goalies[0] : dg1;
+          } else {
+            planGoalieH1Player = goalieForHalf1; planGoalieH2Player = goalieForHalf2;
+          }
+          if (startingLineup && startingLineup.goalieId) {
+            const selectedGoalie = gamePlayers.find(p => p.id === startingLineup.goalieId);
+            if (selectedGoalie) planGoalieH1Player = selectedGoalie;
+          } else if (goalieForHalf1 && gamePlayers.find(p => p.id === goalieForHalf1.id)) {
+            planGoalieH1Player = goalieForHalf1;
+          }
+          let h1Slots = [];
+          if (planGoalieH1Player) {
+            if (startingLineup && startingLineup.outfieldIds && startingLineup.outfieldIds.length > 0) {
+              const initialAssignments = {};
+              gamePlayers.forEach(p => {
+                if (p.id === startingLineup.goalieId) {
+                  initialAssignments[p.id] = 'GK';
+                  cumulativePlanStats[p.id].GK++;
+                  cumulativePlanStats[p.id].consecutiveON = 0;
+                  cumulativePlanStats[p.id].playedInH1 = true;
+                } else if (startingLineup.outfieldIds.includes(p.id)) {
+                  initialAssignments[p.id] = 'ON';
+                  cumulativePlanStats[p.id].ON++;
+                  cumulativePlanStats[p.id].consecutiveON = 1;
+                  cumulativePlanStats[p.id].playedInH1 = true;
+                } else {
+                  initialAssignments[p.id] = 'OFF';
+                  cumulativePlanStats[p.id].OFF++;
+                  cumulativePlanStats[p.id].consecutiveON = 0;
+                }
+              });
+              h1Slots.push({ assignments: initialAssignments });
+              const remaining = generateHalfPlan(
+                gamePlayers,
+                planGoalieH1Player,
+                dgOutfieldH1Player,
+                numSlotsPerHalf - 1,
+                1,
+                cumulativePlanStats,
+                initialAssignments
+              );
+              h1Slots = h1Slots.concat(remaining);
+            } else {
+              h1Slots = generateHalfPlan(
+                gamePlayers,
+                planGoalieH1Player,
+                dgOutfieldH1Player,
+                numSlotsPerHalf,
+                1,
+                cumulativePlanStats,
+                null
+              );
+            }
+          }
+          const lastSlotH1Assignments = h1Slots.length > 0 ? h1Slots[h1Slots.length - 1].assignments : null;
+          const actualPlanGoalieH2 =
+            (goalieForHalf2 && gamePlayers.find(p => p.id === goalieForHalf2.id)) ? goalieForHalf2 : planGoalieH2Player;
+          const h2Slots = actualPlanGoalieH2
+            ? generateHalfPlan(gamePlayers, actualPlanGoalieH2, dgOutfieldH2Player, numSlotsPerHalf, 2, cumulativePlanStats, lastSlotH1Assignments)
+            : [];
+          setSubstitutionPlan({ half1: h1Slots, half2: h2Slots, totalPlayerSlotCounts: cumulativePlanStats });
+          setPlanDeviated(false);
+          setAcknowledgedPlannedSubSlotIndex(-1);
+        }, [designatedGoalie1Id, designatedGoalie2Id, goalieForHalf1, goalieForHalf2, generateHalfPlan]);
         React.useEffect(() => { if (!substitutionPlan || !(gamePhase.includes('Playing') || gamePhase.includes('PreHalf'))) { setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); return; } const currentPlanHalfData = currentHalf === 1 ? substitutionPlan.half1 : substitutionPlan.half2; if (!currentPlanHalfData || currentPlanHalfData.length === 0) { setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: '', slotIndex: -1, isInitialLineup: false }); return; } let firstRelevantSlotIndex = acknowledgedPlannedSubSlotIndex + 1; if ((gamePhase.includes('PreHalf1') || gamePhase.includes('PreHalf2')) && acknowledgedPlannedSubSlotIndex === -1) { firstRelevantSlotIndex = 0; } let foundNextSub = false; for (let slotIdx = firstRelevantSlotIndex; slotIdx < currentPlanHalfData.length; slotIdx++) { const prevSlotAssignments = (slotIdx === 0) ? (currentHalf === 2 && substitutionPlan.half1.length > 0 ? substitutionPlan.half1[substitutionPlan.half1.length -1].assignments : {}) : currentPlanHalfData[slotIdx - 1].assignments; const targetSlotAssignments = currentPlanHalfData[slotIdx].assignments; const playersPlannedOff = []; const playersPlannedOn = []; players.forEach(player => { const prevStatus = prevSlotAssignments[player.id]; const targetStatus = targetSlotAssignments[player.id]; if (slotIdx === 0 && targetStatus === 'ON' && player.id !== (currentHalf === 1 ? goalieForHalf1?.id : goalieForHalf2?.id) ) { playersPlannedOn.push(player); } else if (slotIdx > 0) { if (prevStatus === 'ON' && targetStatus !== 'ON') playersPlannedOff.push(player); else if (prevStatus !== 'ON' && targetStatus === 'ON') playersPlannedOn.push(player); } }); const isInitial = (slotIdx === 0 && acknowledgedPlannedSubSlotIndex === -1); if (playersPlannedOff.length > 0 || playersPlannedOn.length > 0 || isInitial) { setNextPlannedSubInfo({ timeString: formatTime(slotIdx * SLOT_DURATION_SECONDS), playersComingOff: playersPlannedOff, playersGoingOn: playersPlannedOn, isApplicable: true, slotIndex: slotIdx, isInitialLineup: isInitial }); foundNextSub = true; break; } } if (!foundNextSub) setNextPlannedSubInfo({ isApplicable: false, playersComingOff: [], playersGoingOn: [], timeString: currentPlanHalfData.length > 0 ? 'End of Half' : '', slotIndex: -1, isInitialLineup: false }); }, [timerSeconds, currentHalf, substitutionPlan, gamePhase, players, acknowledgedPlannedSubSlotIndex, goalieForHalf1, goalieForHalf2]);
         const handleSetupModeSelect = (mode) => { setSetupMode(mode); if (mode === 'manual') setPlayers([]); };
         const handleDefaultPlayerToggle = (playerId) => { setAvailableDefaultPlayers(prev => prev.map(p => p.id === playerId ? {...p, isPlayingToday: !p.isPlayingToday} : p)); };
@@ -156,23 +235,19 @@
           setShowLineupSelector(true);
         };
         const initializePlayerStats = React.useCallback((gamePlayers) => { const initialStats = {}; gamePlayers.forEach(p => { initialStats[p.id] = { name: p.name, number:p.number, outfield: 0, goalie: 0 }; }); setPlayerStats(initialStats); }, []);
-        const setupHalf = React.useCallback((halfNum) => { setCurrentHalf(halfNum); setTimerSeconds(0); setElapsedOnPause(0); if(halfNum === 2){ setHalf2PlayerStartTimes({}); setHalf2PlayerAccumulated({}); } let currentActualGoalie = halfNum === 1 ? goalieForHalf1 : goalieForHalf2; if (!currentActualGoalie) { if (halfNum === 2 && designatedGoalie1Id && !designatedGoalie2Id) { setModalMessage("CRITICAL: Select goalie for 2nd half."); setShowModal(true); setGamePhase('HalfTime'); return; } else { setModalMessage(`Goalie for Half ${halfNum} not defined.`); setShowModal(true); setGamePhase('Setup'); return; } } const halfPlan = halfNum === 1 ? substitutionPlan?.half1 : substitutionPlan?.half2; let initialFieldPlayers = []; if (halfPlan && halfPlan.length > 0 && halfPlan[0].assignments) { const firstSlotAssignments = halfPlan[0].assignments; initialFieldPlayers = players.filter(p => firstSlotAssignments[p.id] === 'ON' && p.id !== currentActualGoalie?.id); } else { const availableForOutfield = players.filter(p => p.id !== currentActualGoalie?.id); initialFieldPlayers = availableForOutfield.slice(0, OUTFIELD_PLAYERS_ON_FIELD); } setActivePlayers(players.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: p.id === currentActualGoalie?.id ? 'Goalie' : initialFieldPlayers.some(fp => fp.id === p.id) ? 'Field' : 'Bench' }))); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); setPitchPlayerPositions({});}, [players, goalieForHalf1, goalieForHalf2, designatedGoalie1Id, designatedGoalie2Id, substitutionPlan]);
+        const setupHalf = React.useCallback((halfNum, startingLineup = null) => { setCurrentHalf(halfNum); setTimerSeconds(0); setElapsedOnPause(0); if(halfNum === 2){ setHalf2PlayerStartTimes({}); setHalf2PlayerAccumulated({}); } let currentActualGoalie = halfNum === 1 ? goalieForHalf1 : goalieForHalf2; if (startingLineup && startingLineup.goalieId) { const selectedGoalie = players.find(p => p.id === startingLineup.goalieId); if (selectedGoalie) currentActualGoalie = selectedGoalie; } if (!currentActualGoalie) { if (halfNum === 2 && designatedGoalie1Id && !designatedGoalie2Id) { setModalMessage("CRITICAL: Select goalie for 2nd half."); setShowModal(true); setGamePhase('HalfTime'); return; } else { setModalMessage(`Goalie for Half ${halfNum} not defined.`); setShowModal(true); setGamePhase('Setup'); return; } } const halfPlan = halfNum === 1 ? substitutionPlan?.half1 : substitutionPlan?.half2; let initialFieldPlayers = []; if (startingLineup && startingLineup.outfieldIds && startingLineup.outfieldIds.length > 0) { initialFieldPlayers = players.filter(p => startingLineup.outfieldIds.includes(p.id)); } else if (halfPlan && halfPlan.length > 0 && halfPlan[0].assignments) { const firstSlotAssignments = halfPlan[0].assignments; initialFieldPlayers = players.filter(p => firstSlotAssignments[p.id] === 'ON' && p.id !== currentActualGoalie?.id); } else { const availableForOutfield = players.filter(p => p.id !== currentActualGoalie?.id); initialFieldPlayers = availableForOutfield.slice(0, OUTFIELD_PLAYERS_ON_FIELD); } setActivePlayers(players.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: p.id === currentActualGoalie?.id ? 'Goalie' : initialFieldPlayers.some(fp => fp.id === p.id) ? 'Field' : 'Bench' }))); setPlanDeviated(false); setAcknowledgedPlannedSubSlotIndex(-1); setPitchPlayerPositions({});}, [players, goalieForHalf1, goalieForHalf2, designatedGoalie1Id, designatedGoalie2Id, substitutionPlan]);
         React.useEffect(() => { let interval; if (isTimerRunning) { interval = setInterval(() => { const elapsed = Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause; const newTimerValue = Math.min(elapsed, HALF_DURATION_SECONDS); setTimerSeconds(newTimerValue); if (newTimerValue >= HALF_DURATION_SECONDS) { setIsTimerRunning(false); if (currentHalf === 1) setGamePhase('HalfTime'); else setGamePhase('FullTime'); } }, 1000); } return () => clearInterval(interval); }, [isTimerRunning, halfStartTime, elapsedOnPause, currentHalf]);
-        React.useEffect(() => { if (gamePhase === 'PreHalf1') setupHalf(1); else if (gamePhase === 'PreHalf2') setupHalf(2); }, [gamePhase, setupHalf]);
+        React.useEffect(() => { if (gamePhase === 'PreHalf2') setupHalf(2); }, [gamePhase, setupHalf]);
 
-        // When lineup is confirmed, set activePlayers and proceed
+        // When lineup is confirmed, initialize half with selected lineup and proceed
         const handleConfirmStartingLineup = () => {
           const allPlayers = players;
-          const goalie = allPlayers.find(p => p.id === pendingStartingLineup.goalieId);
-          const outfield = pendingStartingLineup.outfieldIds.map(id => allPlayers.find(p => p.id === id)).filter(Boolean);
-          const bench = allPlayers.filter(p => p.id !== pendingStartingLineup.goalieId && !pendingStartingLineup.outfieldIds.includes(p.id));
-          setActivePlayers([
-            ...(goalie ? [{ playerId: goalie.id, name: goalie.name, number: goalie.number, status: 'Goalie' }] : []),
-            ...outfield.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: 'Field' })),
-            ...bench.map(p => ({ playerId: p.id, name: p.name, number: p.number, status: 'Bench' }))
-          ]);
+          const selectedLineup = { ...pendingStartingLineup };
           setShowLineupSelector(false);
-          generateFullGamePlan(allPlayers);
+          const selectedGoalie = allPlayers.find(p => p.id === selectedLineup.goalieId) || null;
+          if (selectedGoalie) setGoalieForHalf1(selectedGoalie);
+          generateFullGamePlan(allPlayers, selectedLineup);
+          setupHalf(1, selectedLineup);
           setGamePhase('PreHalf1');
         };
         const handlePause = () => { if (!isTimerRunning) return; setIsTimerRunning(false); const elapsed = Math.round((Date.now() - halfStartTime) / 1000) + elapsedOnPause; setElapsedOnPause(Math.min(elapsed, HALF_DURATION_SECONDS)); };
