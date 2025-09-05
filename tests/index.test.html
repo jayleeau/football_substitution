@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tests - Soccer Substitution Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/mocha/mocha.css" />
+</head>
+<body>
+  <div id="mocha"></div>
+  <div id="test-root" style="display:none"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script src="https://unpkg.com/mocha/mocha.js"></script>
+  <script src="https://unpkg.com/chai/chai.js"></script>
+  <script>mocha.setup('bdd');</script>
+
+  <script type="text/babel" src="../src/constants.js"></script>
+  <script type="text/babel" src="../src/utils.js"></script>
+  <script type="text/babel" src="../src/logic.js"></script>
+
+  <script type="text/babel">
+    describe('Sanity', function() {
+      it('AppConstants should be defined', function() {
+        chai.expect(window.AppConstants).to.be.an('object');
+        chai.expect(window.AppConstants.OUTFIELD_PLAYERS_ON_FIELD).to.equal(6);
+      });
+      it('AppUtils.formatTime should format mm:ss', function() {
+        chai.expect(window.AppUtils.formatTime(0)).to.equal('00:00');
+        chai.expect(window.AppUtils.formatTime(65)).to.equal('01:05');
+      });
+      it('AppLogic should expose helpers', function() {
+        chai.expect(window.AppLogic).to.be.an('object');
+        chai.expect(window.AppLogic.generateFullGamePlan).to.be.a('function');
+      });
+    });
+
+    describe('Lineup selection reflects starting lineup', function() {
+      it('getInitialActivePlayers should respect selected goalie and outfielders', function() {
+        const C = window.AppConstants;
+        const players = [
+          { id: 'p1', name: 'A', number: '1' },{ id: 'p2', name: 'B', number: '2' },{ id: 'p3', name: 'C', number: '3' },
+          { id: 'p4', name: 'D', number: '4' },{ id: 'p5', name: 'E', number: '5' },{ id: 'p6', name: 'F', number: '6' },
+          { id: 'p7', name: 'G', number: '7' }
+        ];
+        const starting = { goalieId: 'p7', outfieldIds: ['p1','p2','p3','p4','p5','p6'] };
+        const actives = window.AppLogic.getInitialActivePlayers(players, null, starting, null, C);
+        const byId = Object.fromEntries(actives.map(a => [a.playerId, a.status]));
+        chai.expect(byId['p7']).to.equal('Goalie');
+        ['p1','p2','p3','p4','p5','p6'].forEach(id => chai.expect(byId[id]).to.equal('Field'));
+      });
+    });
+
+    mocha.run();
+  </script>
+</body>
+</html>
+
+
